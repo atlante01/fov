@@ -1,54 +1,65 @@
-minetest.register_chatcommand("fov", {
-    description = "Adjust the player's FOV using a scrollbar (70 to 170)",
-    func = function(name)
-        local player = minetest.get_player_by_name(name)
-        if not player then
-            return false, "Player not found."
-        end
+local player_HUD = {}
 
-        local fov_min = 45
-        local fov_max = 170
-        local current_fov = player:get_fov()
-        local slider_value = 0
-        if current_fov >= fov_min and current_fov <= fov_max then
-            slider_value = math.floor((current_fov - fov_min) * 1000 / (fov_max - fov_min))
-        end
+local function display_FOV_Form(pname, fov_value)
+	local player = core.get_player_by_name(pname)
+	if not player then return end
+	local formspec =
+		"size[8,4]no_prepend[]bgcolor[black;neither]scrollbaroptions[min=45;max=160;smallstep=1;largestep=1;thumbsize=2]" ..
+		"scrollbar[0,2;7.8,0.5;horizontal;sb_font_size;" .. fov_value .. "]"
+	player_HUD[pname] = player:hud_add({
+		hud_elem_type = "text",
+		text = "FOV: " .. fov_value,
+		position = {x = 0.5, y = 0.4},
+		number = 0xFFFFFF,
+	})
+	core.show_formspec(pname, "fov:fov_fs", formspec)
+end
 
-        local formspec =
-			"formspec_version[7]" ..
-			"size[6,2,false]" ..
-			"no_prepend[]" ..
-            "label[0.5,0.5;Current FOV: " .. current_fov .. "]" ..
-            "scrollbar[0.5,1;5,0.4;horizontal;new_fov;" .. slider_value .. "]" ..
-            "button_exit[1,2.5;4,1;exit;Quit]"
+local function update_FOV_Value(pname, value)
+	local player = core.get_player_by_name(pname)
+	if not player then return end
+	local meta = player:get_meta()
+	meta:set_int("fov", value)
+	player:set_fov(value)
+	local hudId = player_HUD[pname]
+	if hudId then
+		player:hud_change(hudId, "text", "FOV: " .. value)
+	end
+end
 
-        minetest.show_formspec(name, "fov:main", formspec)
-        return true
-    end
+core.register_chatcommand("fov", {
+	description = "Adjust your FOV",
+	privs = {interact = true},
+	func = function(pname)
+		local player = core.get_player_by_name(pname)
+		if not player then return end
+		local meta = player:get_meta()
+		display_FOV_Form(pname, meta:get_int("fov"))
+	end
 })
 
-minetest.register_on_player_receive_fields(function(player, formname, fields)
-    if formname ~= "fov:main" then
-        return
-    end
+core.register_on_player_receive_fields(function(player, formName, fields)
+	if formName ~= "fov:fov_fs" then return end
+	local pname = player:get_player_name()
+	if fields.quit then
+		if player_HUD[pname] then
+			player:hud_remove(player_HUD[pname])
+			player_HUD[pname] = nil
+		end
+		return
+	end
+	local event = core.explode_scrollbar_event(fields.sb_font_size)
+	if event and event.value then
+		update_FOV_Value(pname, event.value)
+	end
+end)
 
-    local fov_min = 45
-    local fov_max = 170
-    if fields.new_fov then
-        local raw_value = fields.new_fov
-        if raw_value:sub(1, 4) == "CHG:" then
-            local sanitized_value = raw_value:gsub("^CHG:", ""):gsub("^VAL:", "")
-            local number_value = tonumber(sanitized_value)
-            if number_value then
-                local norm = number_value / 1000
-                local new_fov = fov_min + norm * (fov_max - fov_min)
-                new_fov = math.floor(new_fov + 0.5)
-                player:set_fov(new_fov, false, 0)
-            end
-        end
-    end
-
-    if fields.exit then
-        minetest.close_formspec(player:get_player_name(), "fov:main")
-    end
+core.register_on_joinplayer(function(player)
+	local meta = player:get_meta()
+	local current_fov = meta:get_int("fov")
+	if current_fov == 0 then
+		current_fov = player:get_fov() or 95
+		meta:set_int("fov", current_fov)
+	end
+	player:set_fov(current_fov)
 end)
